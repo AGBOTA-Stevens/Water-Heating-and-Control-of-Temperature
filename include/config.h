@@ -66,6 +66,8 @@ unsigned long lastTempRead  = 0;
 unsigned long lastDisplay   = 0;
 const unsigned long TEMP_INTERVAL    = 2000;
 const unsigned long DISPLAY_INTERVAL = 400;
+const unsigned long BUTTON_DEBOUNCE  = 50; // Anti-rebond pour le bouton poussoir
+const unsigned long LED_BLINK_INTERVAL = 500; // Intervalle de clignotement des LED (en ms)
 
 // ── Caractère ° personnalisé pour LCD ───────────────────────────
 byte degreeChar[8] = {

@@ -50,7 +50,7 @@ void loop() {
     btnPressTime = currentMillis; // Enregistrer le temps de pression du bouton
     btnHandled = false; // Réinitialiser l'état de traitement du bouton
   } else if (btnState == LOW && lastBtnState == HIGH) {
-    if (!btnHandled && (30 < currentMillis - btnPressTime < 800)) {
+    if (!btnHandled && (BUTTON_DEBOUNCE < currentMillis - btnPressTime < 800)) {
       heaterOn = !heaterOn; // Inverser l'état du chauffage si le bouton est relâché avant 800 ms
       btnHandled = true; // Marquer le bouton comme traité
     }
@@ -80,5 +80,20 @@ void loop() {
   if (currentMillis - lastDisplay >= DISPLAY_INTERVAL) {
     afficheurLCD(); // Mettre à jour l'affichage LCD
     lastDisplay = currentMillis;
+  }
+
+  //___6. Gestion des LED pour indiquer l'état du chauffage ____________________________
+  if (enreglage) {
+    if (currentMillis - lastDisplay >= LED_BLINK_INTERVAL) {
+      digitalWrite(RED_LED_PIN, !digitalRead(RED_LED_PIN)); // Faire clignoter la LED rouge si l'enregistrement est en cours
+      digitalWrite(GREEN_LED_PIN, LOW); // Faire clignoter la LED verte si l'enregistrement est en cours
+      lastDisplay = currentMillis;
+    }
+  } else if (heaterOn) {
+    digitalWrite(RED_LED_PIN, HIGH); // Allumer la LED rouge si le chauffage est activé
+    digitalWrite(GREEN_LED_PIN, LOW); // Éteindre la LED verte si le chauffage est activé
+  } else {
+    digitalWrite(RED_LED_PIN, LOW); // Éteindre la LED rouge si le chauffage est désactivé
+    digitalWrite(GREEN_LED_PIN, HIGH); // Allumer la LED verte si le chauffage est désactivé
   }
 } 
