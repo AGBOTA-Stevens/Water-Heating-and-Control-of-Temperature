@@ -8,34 +8,31 @@
 #include <Arduino.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
-#include <LiquidCrystal.h>
-#include <ESP32Encoder.h>
+#include <LiquidCrystal_I2C.h>
+#include <Wire.h>
 #include <PID_v1.h>
 
 //=========================BROCHES==================================//
 
-// Broche OneWire du DS18B20 (D23 sur ESP 32 DEVKIT V1)
-#define ONE_WIRE_BUS 23
+// Broche OneWire du DS18B20 (ne pas partager avec l'I2C)
+#define ONE_WIRE_BUS 19
 
-// Broches pour l'écran LCD (D15, D2, D4, D5, D18, D19 sur ESP 32 DEVKIT V1)
-#define LCD_RS 15
-#define LCD_EN 2
-#define LCD_D4 4
-#define LCD_D5 5
-#define LCD_D6 18
-#define LCD_D7 19
+// Broches pour l'écran LCD (D22, D23 sur ESP 32 DEVKIT V1)
+#define LCD_SDA 22
+#define LCD_SCL 23
+
 
 // Broches de l'encodeur rotatif (D33, D32, D35 sur ESP 32 DEVKIT V1)
-#define CLK 33
+#define CLK 35
 #define DT 32
-#define SW 35
+#define SW 33
 
-// Broches Heater (D34 sur ESP 32 DEVKIT V1)
-#define HEATER_PIN 34
+// Broche Heater (D26 sur ESP 32 DEVKIT V1, pin de sortie PWM valide)
+#define HEATER_PIN 26
 
 // Broches des LED RED & GREEN (D25, D26 sur ESP 32 DEVKIT V1)
 #define RED_LED_PIN 25
-#define GREEN_LED_PIN 26
+#define GREEN_LED_PIN 27
 
 //=========================PARAMETRES==================================//   
 
@@ -51,15 +48,28 @@ const double temperatureThreshold = 1.5; // Seuil de température pour le contr�
 #define TEMP_MAX      100.0
 #define TEMP_STEP     1.0     // Pas de réglage par clic encodeur
 #define HISTERESIS     0.5     // Hystérésis pour éviter les oscillations du chauffage
+
+
+// ---- Configuration PWM (HEATER) ----
+const int PWM_FREQ       = 10000;   // 10 kHz
+const int PWM_RESOLUTION = 8;      // 8 bits -> valeurs 0-255
+const int PWM_CHANNEL    = 0;
+
+
 // ── Encodeur rotatif ────────────────────────────────────────────
 volatile int encoderPos  = 0;
 volatile int lastCLKstate;
 
 // ── Anti-rebond bouton ───────────────────────────────────────────
-// D35 est relié à GND, donc repos = LOW
-bool          lastBtnState  = LOW;    // repos = LOW sur D35
-unsigned long btnPressTime  = 0;
-bool          btnHandled    = false;
+// SW utilise INPUT_PULLUP : repos = HIGH, appui = LOW
+volatile bool buttonPressedEvent  = false;
+volatile bool buttonReleasedEvent = false;
+volatile unsigned long buttonPressStartMs = 0;
+volatile unsigned long buttonReleaseMs    = 0;
+volatile unsigned long lastButtonIrqMs    = 0;
+bool          buttonIsPressed = false;
+unsigned long btnPressTime    = 0;
+bool          btnHandled      = false;
 
 // ── Timing ──────────────────────────────────────────────────────
 unsigned long lastTempRead  = 0;
@@ -67,7 +77,9 @@ unsigned long lastDisplay   = 0;
 const unsigned long TEMP_INTERVAL    = 2000;
 const unsigned long DISPLAY_INTERVAL = 400;
 const unsigned long BUTTON_DEBOUNCE  = 50; // Anti-rebond pour le bouton poussoir
+const unsigned long BUTTON_LONG_PRESS = 5000; // Durée d'appui long pour réinitialiser
 const unsigned long LED_BLINK_INTERVAL = 500; // Intervalle de clignotement des LED (en ms)
+unsigned long lastLedBlink = 0;
 
 // ── Caractère ° personnalisé pour LCD ───────────────────────────
 byte degreeChar[8] = {
@@ -87,8 +99,7 @@ bool heaterOn = false; // Variable pour indiquer si le chauffage est activé
 
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
-LiquidCrystal lcd(LCD_RS, LCD_EN, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
-ESP32Encoder encoder;
+LiquidCrystal_I2C lcd(0x27, 16, 2); // Adresse I2C de l'écran LCD (0x27 ou 0x3F) et dimensions (16 colonnes, 2 lignes)
 PID myPID(&input, &output, &setpoint, Kp, Ki, Kd, DIRECT);
 
 //=========================FONCTIONS==================================//
@@ -99,6 +110,7 @@ float readTemperatureC() {
   const float temp = sensors.getTempCByIndex(0);
   if (temp == DEVICE_DISCONNECTED_C) {
     heaterOn = false; // Désactiver le chauffage si le capteur est déconnecté
+    input = NAN; // Mettre à jour la variable d'entrée pour le PID avec une valeur NaN
     return NAN;
   }
   input = (double)temp; // Mettre à jour la variable d'entrée pour le PID
@@ -116,6 +128,64 @@ void IRAM_ATTR handleEncoderInterrupt() {
   }
 }
 
+void IRAM_ATTR handleButtonInterrupt() {
+  unsigned long now = millis();
+  if (now - lastButtonIrqMs < BUTTON_DEBOUNCE) {
+    return;
+  }
+  lastButtonIrqMs = now;
+
+  if (digitalRead(SW) == LOW) {
+    buttonPressStartMs = now;
+    buttonPressedEvent = true;
+  } else {
+    buttonReleaseMs = now;
+    buttonReleasedEvent = true;
+  }
+}
+
+void handleShortButtonPress() {
+  heaterOn = !heaterOn; // Inverser l'état du chauffage
+  enreglage = false; // Sortir du mode d'enregistrement si le bouton est pressé
+}
+
+void handleLongButtonPress() {
+  setpoint_cache = 60.0;
+  setpoint = setpoint_cache;
+  heaterOn = false; // Désactiver le chauffage lors de la réinitialisation
+  enreglage = false;
+}
+
+void handleButton(unsigned long currentMillis) {
+  noInterrupts();
+  bool pressedEvent = buttonPressedEvent;
+  bool releasedEvent = buttonReleasedEvent;
+  unsigned long pressedAt = buttonPressStartMs;
+  unsigned long releasedAt = buttonReleaseMs;
+  buttonPressedEvent = false;
+  buttonReleasedEvent = false;
+  interrupts();
+
+  if (pressedEvent) {
+    buttonIsPressed = true;
+    btnPressTime = pressedAt;
+    btnHandled = false;
+  }
+
+  if (buttonIsPressed && !btnHandled && currentMillis - btnPressTime >= BUTTON_LONG_PRESS) {
+    handleLongButtonPress();
+    btnHandled = true;
+  }
+
+  if (releasedEvent) {
+    unsigned long heldTime = releasedAt - btnPressTime;
+    if (buttonIsPressed && !btnHandled && heldTime >= BUTTON_DEBOUNCE) {
+      handleShortButtonPress();
+    }
+    buttonIsPressed = false;
+    btnHandled = false;
+  }
+}
 
 void afficheurLCD() {
   lcd.setCursor(0, 0);
@@ -127,13 +197,12 @@ void afficheurLCD() {
     lcd.write(byte(0)); // Affiche le caractère °
     lcd.print("C");
   }
-
   lcd.setCursor(0, 1);
   lcd.print("Set: ");
   lcd.print(setpoint_cache, 1);
   lcd.write(byte(0)); // Affiche le caractère °
   lcd.print("C");
-
+  
   // Réglage de la température consignée avec l'encodeur rotatif
   if (enreglage) {
     lcd.setCursor(0, 1);
@@ -141,6 +210,11 @@ void afficheurLCD() {
     lcd.print(setpoint_cache, 1);
     lcd.write(byte(0)); // Affiche le caractère °
     lcd.print("C");
+  }
+  if (heaterOn) {
+    lcd.print(" H:ON");
+  } else {
+    lcd.print(" H:OFF");
   }
 }
 
