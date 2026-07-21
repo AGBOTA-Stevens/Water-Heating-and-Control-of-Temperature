@@ -37,9 +37,9 @@
 //=========================PARAMETRES==================================//   
 
 
-double setpoint = 60.0, input, output, setpoint_cache = 60.0; // Variables pour le PID
+double setpoint = 100.0, input, output, setpoint_cache = 100.0; // Variables pour le PID
 
-double Kp = 2.0, Ki = 5.0, Kd = 1.0; // Paramètres PID
+double Kp = 900.0, Ki = 0.0, Kd = 0.0; // Paramètres PID
 
 const double temperatureThreshold = 1.5; // Seuil de température pour le contrôle du chauffage
 
@@ -51,7 +51,7 @@ const double temperatureThreshold = 1.5; // Seuil de température pour le contr�
 
 
 // ---- Configuration PWM (HEATER) ----
-const int PWM_FREQ       = 10000;   // 10 kHz
+const int PWM_FREQ       = 50;   // 50 Hz
 const int PWM_RESOLUTION = 8;      // 8 bits -> valeurs 0-255
 const int PWM_CHANNEL    = 0;
 
@@ -109,14 +109,19 @@ float readTemperatureC() {
   sensors.requestTemperatures();
   const float temp = sensors.getTempCByIndex(0);
   if (temp == DEVICE_DISCONNECTED_C) {
-    heaterOn = false; // Désactiver le chauffage si le capteur est déconnecté
     input = NAN; // Mettre à jour la variable d'entrée pour le PID avec une valeur NaN
     return NAN;
   }
   input = (double)temp; // Mettre à jour la variable d'entrée pour le PID
   return temp;
 }
-
+// Convertit sortie PID (0-1023) vers zone utile uniquement
+int remapPWM(int pidOutput) {
+  if (pidOutput <= 0) return 1023;   // éteint
+  // Zone utile : PWM 0 à 319 seulement
+  int pwm = map(pidOutput, 0, 1023, 319, 0);
+  return constrain(pwm, 0, 1023);
+}
 // Une Interruption pour l'encodeur rotatif
 void IRAM_ATTR handleEncoderInterrupt() {
   int CLKstate = digitalRead(CLK);

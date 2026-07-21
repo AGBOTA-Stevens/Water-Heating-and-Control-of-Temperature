@@ -12,7 +12,7 @@ void setup() {
   lcd.backlight(); // Activation du rétroéclairage de l'écran LCD
   lcd.clear(); // Effacement de l'écran LCD
   myPID.SetMode(AUTOMATIC); // Activation du PID
-  myPID.SetOutputLimits(0, 255); // Limitation de la sortie du PID entre 0 et 255 (pour PWM)
+  myPID.SetOutputLimits(0, 1023); // Limitation de la sortie du PID entre 0 et 1023 (pour PWM)
   pinMode(SW, INPUT_PULLUP); // SW au repos = HIGH, appuyé = LOW
   pinMode(CLK, INPUT); // Configuration de la broche CLK de l'encodeur en entrée
   pinMode(DT, INPUT); // Configuration de la broche DT de l'encode
@@ -56,15 +56,11 @@ void loop() {
 
   //___4. Contrôle du chauffage TOR/PID ____________________________
   if (heaterOn) {
-    double error = setpoint - input;
-    if (error > 0 && error <= HISTERESIS || error < 0 && error >= -HISTERESIS) {
+    if (!isnan(input)) { // Vérifier si la température est valide avant de calculer le PID
       myPID.Compute(); // Calculer la sortie du PID
-      ledcWrite(PWM_CHANNEL, (int)output); // Appliquer la sortie du PID au chauffage
-    } else if (error > HISTERESIS) {
-      ledcWrite(PWM_CHANNEL, 255); // Allumer le chauffage à pleine puissance si la température est inférieure à la consigne moins l'hystérésis
+      ledcWrite(PWM_CHANNEL, (int)output); // Appliquer la sortie du PID à la broche de chauffage via PWM
     } else {
-      ledcWrite(PWM_CHANNEL, 0); // Éteindre le chauffage si la température est supérieure à la consigne
-      heaterOn = false; // Désactiver le chauffage si la température est supérieure à la consigne
+      ledcWrite(PWM_CHANNEL, 0); // Éteindre le chauffage si la température est invalide
     }
   } else {
     ledcWrite(PWM_CHANNEL, 0); // Éteindre le chauffage si désactivé
@@ -73,6 +69,14 @@ void loop() {
   //___5. Affichage sur l'écran LCD toutes les 400 ms ____________________________
   if (currentMillis - lastDisplay >= DISPLAY_INTERVAL) {
     afficheurLCD(); // Mettre à jour l'affichage LCD
+    if (heaterOn) {
+      Serial.print("Temp: ");
+      Serial.print(input);
+      Serial.print(" °C, Setpoint: ");
+      Serial.print(setpoint);
+      Serial.print(" °C, Output: ");
+      Serial.println(output);
+    }
     lastDisplay = currentMillis;
   }
 
