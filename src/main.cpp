@@ -12,7 +12,7 @@ void setup() {
   lcd.backlight(); // Activation du rétroéclairage de l'écran LCD
   lcd.clear(); // Effacement de l'écran LCD
   myPID.SetMode(AUTOMATIC); // Activation du PID
-  myPID.SetOutputLimits(0, 1023); // Limitation de la sortie du PID entre 0 et 1023 (pour PWM)
+  myPID.SetOutputLimits(0, PWM_MAX_DUTY); // Limitation de la sortie du PID pour le PWM
   pinMode(SW, INPUT_PULLUP); // SW au repos = HIGH, appuyé = LOW
   pinMode(CLK, INPUT); // Configuration de la broche CLK de l'encodeur en entrée
   pinMode(DT, INPUT); // Configuration de la broche DT de l'encode
@@ -35,8 +35,14 @@ void loop() {
   handleButton(currentMillis);
 
   //___1. Lecture de la température toutes les 2000 ms _________________________________
+
   if (currentMillis - lastTempRead >= TEMP_INTERVAL) {
+    previousInput = input;
     readTemperatureC();
+    changeinput = !isnan(input) && !isnan(previousInput) && fabs(input - previousInput) > 0.01;
+    if (heaterOn && !isnan(input)) {
+      determineTu(currentMillis); // Déterminer Tu uniquement à chaque nouvelle mesure
+    }
     lastTempRead = currentMillis;
   }
 
@@ -51,6 +57,7 @@ void loop() {
       setpoint_cache = TEMP_MAX; // Limiter la consigne à 100°C maximum
     }
     setpoint = setpoint_cache; // Mettre à jour la consigne pour le PID
+    resetTuDetection(); // Repartir sur une mesure Tu propre après changement de consigne
     encoderPos = 0; // Réinitialiser le compteur de l'encodeur
   }
 
@@ -58,7 +65,7 @@ void loop() {
   if (heaterOn) {
     if (!isnan(input)) { // Vérifier si la température est valide avant de calculer le PID
       myPID.Compute(); // Calculer la sortie du PID
-      ledcWrite(PWM_CHANNEL, (int)output); // Appliquer la sortie du PID à la broche de chauffage via PWM
+      ledcWrite(PWM_CHANNEL, constrain((int)output, 0, PWM_MAX_DUTY)); // Appliquer la sortie du PID à la broche de chauffage via PWM
     } else {
       ledcWrite(PWM_CHANNEL, 0); // Éteindre le chauffage si la température est invalide
     }

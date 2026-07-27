@@ -37,7 +37,7 @@
 //=========================PARAMETRES==================================//   
 
 
-double setpoint = 100.0, input, output, setpoint_cache = 100.0; // Variables pour le PID
+double setpoint = 100.0, input, output, setpoint_cache = 100.0, previousInput = 0.0; // Variables pour le PID
 
 double Kp = 900.0, Ki = 0.0, Kd = 0.0; // Paramètres PID
 
@@ -54,6 +54,7 @@ const double temperatureThreshold = 1.5; // Seuil de température pour le contr�
 const int PWM_FREQ       = 50;   // 50 Hz
 const int PWM_RESOLUTION = 8;      // 8 bits -> valeurs 0-255
 const int PWM_CHANNEL    = 0;
+const int PWM_MAX_DUTY   = (1 << PWM_RESOLUTION) - 1;
 
 
 // ── Encodeur rotatif ────────────────────────────────────────────
@@ -70,6 +71,8 @@ volatile unsigned long lastButtonIrqMs    = 0;
 bool          buttonIsPressed = false;
 unsigned long btnPressTime    = 0;
 bool          btnHandled      = false;
+bool changeinput = true; // Variable pour indiquer si l'entrée a changé
+
 
 // ── Timing ──────────────────────────────────────────────────────
 unsigned long lastTempRead  = 0;
@@ -80,6 +83,11 @@ const unsigned long BUTTON_DEBOUNCE  = 50; // Anti-rebond pour le bouton poussoi
 const unsigned long BUTTON_LONG_PRESS = 5000; // Durée d'appui long pour réinitialiser
 const unsigned long LED_BLINK_INTERVAL = 500; // Intervalle de clignotement des LED (en ms)
 unsigned long lastLedBlink = 0;
+
+const int TU_PERIODS_REQUIRED = 3; // Nombre de périodes à moyenner pour Tu
+int countTu = 0; // Compteur pour déterminer le Tu de Ziegler-Nichols
+unsigned long lastTuCrossingMs = 0;
+unsigned long tuPeriodSumMs = 0;
 
 // ── Caractère ° personnalisé pour LCD ───────────────────────────
 byte degreeChar[8] = {
@@ -115,12 +123,71 @@ float readTemperatureC() {
   input = (double)temp; // Mettre à jour la variable d'entrée pour le PID
   return temp;
 }
-// Convertit sortie PID (0-1023) vers zone utile uniquement
-int remapPWM(int pidOutput) {
-  if (pidOutput <= 0) return 1023;   // éteint
-  // Zone utile : PWM 0 à 319 seulement
-  int pwm = map(pidOutput, 0, 1023, 319, 0);
-  return constrain(pwm, 0, 1023);
+// Détermine le Tu de Ziegler-Nichols
+void resetTuDetection() {
+  countTu = 0;
+  lastTuCrossingMs = 0;
+  tuPeriodSumMs = 0;
+}
+
+void determineTu(unsigned long currentMillis) {
+  if (Ki != 0.0 || Kd != 0.0 || isnan(input) || isnan(previousInput)) {
+    return;
+  }
+
+  bool crossedSetpointUp = previousInput < setpoint && input >= setpoint;
+  if (!crossedSetpointUp) {
+    return;
+  }
+
+  if (lastTuCrossingMs == 0) {
+    lastTuCrossingMs = currentMillis;
+    Serial.println("Tu: premier passage montant du setpoint detecte");
+    return;
+  }
+
+  unsigned long periodMs = currentMillis - lastTuCrossingMs;
+  lastTuCrossingMs = currentMillis;
+
+  if (periodMs == 0) {
+    return;
+  }
+
+  tuPeriodSumMs += periodMs;
+  countTu++;
+
+  Serial.print("Tu periode ");
+  Serial.print(countTu);
+  Serial.print(" : ");
+  Serial.print(periodMs / 1000.0, 2);
+  Serial.println(" s");
+
+  if (countTu >= TU_PERIODS_REQUIRED) {
+    double Tu = (tuPeriodSumMs / (double)countTu) / 1000.0; // Convertir en secondes
+    double Ku = Kp; // Gain critique utilise pendant l'essai
+
+    if (Tu <= 0.0) {
+      resetTuDetection();
+      return;
+    }
+
+    Serial.print("Tu de Ziegler-Nichols : ");
+    Serial.print(Tu, 2);
+    Serial.println(" secondes");
+
+    // Reglage Ziegler-Nichols PID classique : Kp=0.6Ku, Ti=Tu/2, Td=Tu/8
+    Kp = 0.6 * Ku;
+    Ki = 1.2 * Ku / Tu;
+    Kd = 0.075 * Ku * Tu;
+    myPID.SetTunings(Kp, Ki, Kd);
+
+    Serial.print("Nouveaux gains PID => Kp: ");
+    Serial.print(Kp, 2);
+    Serial.print(", Ki: ");
+    Serial.print(Ki, 2);
+    Serial.print(", Kd: ");
+    Serial.println(Kd, 2);
+  }
 }
 // Une Interruption pour l'encodeur rotatif
 void IRAM_ATTR handleEncoderInterrupt() {
@@ -151,6 +218,9 @@ void IRAM_ATTR handleButtonInterrupt() {
 
 void handleShortButtonPress() {
   heaterOn = !heaterOn; // Inverser l'état du chauffage
+  if (heaterOn) {
+    resetTuDetection(); // Nouvelle mesure Tu à chaque démarrage du chauffage
+  }
   enreglage = false; // Sortir du mode d'enregistrement si le bouton est pressé
 }
 
@@ -159,6 +229,7 @@ void handleLongButtonPress() {
   setpoint = setpoint_cache;
   heaterOn = false; // Désactiver le chauffage lors de la réinitialisation
   enreglage = false;
+  resetTuDetection();
 }
 
 void handleButton(unsigned long currentMillis) {
@@ -204,7 +275,7 @@ void afficheurLCD() {
   }
   lcd.setCursor(0, 1);
   lcd.print("Set: ");
-  lcd.print(setpoint_cache, 1);
+  lcd.print(setpoint, 1);
   lcd.write(byte(0)); // Affiche le caractère °
   lcd.print("C");
   
