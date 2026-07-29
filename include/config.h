@@ -39,7 +39,7 @@
 
 double setpoint = 100.0, input, output, setpoint_cache = 100.0, previousInput = 0.0; // Variables pour le PID
 
-double Kp = 900.0, Ki = 0.0, Kd = 0.0; // Paramètres PID
+double Kp = 800.0, Ki = 0.0, Kd = 0.0; // Paramètres PID
 
 const double temperatureThreshold = 1.5; // Seuil de température pour le contrôle du chauffage
 
