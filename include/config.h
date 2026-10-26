@@ -178,7 +178,7 @@ void determineTu(unsigned long currentMillis) {
     // Reglage Ziegler-Nichols PID classique : Kp=0.6Ku, Ti=Tu/2, Td=Tu/8
     Kp = 0.6 * Ku;
     Ki = 1.2 * Ku / Tu;
-    Kd = 0.075 * Ku * Tu;
+    Kd = 0.0;
     myPID.SetTunings(Kp, Ki, Kd);
 
     Serial.print("Nouveaux gains PID => Kp: ");
@@ -293,5 +293,15 @@ void afficheurLCD() {
     lcd.print(" H:OFF");
   }
 }
+// Fonction pour régler la puissance du chauffage avec une bande morte
+void setHeaterPower(int power) {
+  // Deadband — éteint complètement si proche de la cible
+  if (abs(setpoint - input) < 2.0) {
+    ledcWrite(0, 0);
+    return;
+  }
+  // Deux NPN → logique directe, pas d'inversion
+  ledcWrite(PWM_CHANNEL, constrain(power, 0, PWM_MAX_DUTY)); // Appliquer la sortie du PID à la broche de chauffage via PWM
 
+}
 #endif // CONFIG_H

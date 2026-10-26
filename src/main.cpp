@@ -11,8 +11,9 @@ void setup() {
   lcd.createChar(0, degreeChar); // Création du caractère °
   lcd.backlight(); // Activation du rétroéclairage de l'écran LCD
   lcd.clear(); // Effacement de l'écran LCD
-  myPID.SetMode(AUTOMATIC); // Activation du PID
   myPID.SetOutputLimits(0, PWM_MAX_DUTY); // Limitation de la sortie du PID pour le PWM
+  myPID.SetSampleTime(2000); // Définition du temps d'échantillonnage du PID à 100 ms  
+  myPID.SetMode(AUTOMATIC); // Activation du PID
   pinMode(SW, INPUT_PULLUP); // SW au repos = HIGH, appuyé = LOW
   pinMode(CLK, INPUT); // Configuration de la broche CLK de l'encodeur en entrée
   pinMode(DT, INPUT); // Configuration de la broche DT de l'encode
@@ -65,7 +66,7 @@ void loop() {
   if (heaterOn) {
     if (!isnan(input)) { // Vérifier si la température est valide avant de calculer le PID
       myPID.Compute(); // Calculer la sortie du PID
-      ledcWrite(PWM_CHANNEL, constrain((int)output, 0, PWM_MAX_DUTY)); // Appliquer la sortie du PID à la broche de chauffage via PWM
+      setHeaterPower((int)output); // Régler la puissance du chauffage en fonction de la sortie du PID
     } else {
       ledcWrite(PWM_CHANNEL, 0); // Éteindre le chauffage si la température est invalide
     }
