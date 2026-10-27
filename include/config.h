@@ -264,6 +264,7 @@ void handleButton(unsigned long currentMillis) {
 }
 
 void afficheurLCD() {
+  lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print("Temp: ");
   if (isnan(input)) {
@@ -296,7 +297,7 @@ void afficheurLCD() {
 // Fonction pour régler la puissance du chauffage avec une bande morte
 void setHeaterPower(int power) {
   // Deadband — éteint complètement si proche de la cible
-  if (abs(setpoint - input) < 2.0) {
+  if (abs(setpoint - input) < 3.0) {
     ledcWrite(0, 0);
     return;
   }
