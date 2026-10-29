@@ -12,7 +12,7 @@ void setup() {
   lcd.backlight(); // Activation du rétroéclairage de l'écran LCD
   lcd.clear(); // Effacement de l'écran LCD
   myPID.SetOutputLimits(0, PWM_MAX_DUTY); // Limitation de la sortie du PID pour le PWM
-  myPID.SetSampleTime(2000); // Définition du temps d'échantillonnage du PID à 100 ms  
+  myPID.SetSampleTime(1000); // Définition du temps d'échantillonnage du PID à 1000 ms  
   myPID.SetMode(AUTOMATIC); // Activation du PID
   pinMode(SW, INPUT_PULLUP); // SW au repos = HIGH, appuyé = LOW
   pinMode(CLK, INPUT); // Configuration de la broche CLK de l'encodeur en entrée
@@ -42,7 +42,14 @@ void loop() {
     readTemperatureC();
     changeinput = !isnan(input) && !isnan(previousInput) && fabs(input - previousInput) > 0.01;
     if (heaterOn && !isnan(input)) {
+      markHeatingCompleted();
       determineTu(currentMillis); // Déterminer Tu uniquement à chaque nouvelle mesure
+    }
+    if (experimentLogging && !isnan(input)) {
+      logExperimentSample(currentMillis);
+      if (coolingReachedAmbient()) {
+        stopExperimentLogging();
+      }
     }
     lastTempRead = currentMillis;
   }
@@ -50,6 +57,7 @@ void loop() {
   //___2. Gestion de l'encodeur rotatif pour le réglage de la température consignée ______
   if (encoderPos != 0) {
     heaterOn = false;
+    stopExperimentLogging();
     enreglage = true;
     setpoint_cache += (double)encoderPos * 0.5; // Incrémenter ou décrémenter la consigne par pas de 0.5°C
     if (setpoint_cache < TEMP_MIN) {
