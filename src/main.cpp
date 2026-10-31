@@ -12,7 +12,7 @@ void setup() {
   lcd.backlight(); // Activation du rétroéclairage de l'écran LCD
   lcd.clear(); // Effacement de l'écran LCD
   myPID.SetOutputLimits(0, PWM_MAX_DUTY); // Limitation de la sortie du PID pour le PWM
-  myPID.SetSampleTime(1000); // Définition du temps d'échantillonnage du PID à 1000 ms  
+  myPID.SetSampleTime(2000); // Définition du temps d'échantillonnage du PID à 2000 ms  
   myPID.SetMode(AUTOMATIC); // Activation du PID
   pinMode(SW, INPUT_PULLUP); // SW au repos = HIGH, appuyé = LOW
   pinMode(CLK, INPUT); // Configuration de la broche CLK de l'encodeur en entrée
