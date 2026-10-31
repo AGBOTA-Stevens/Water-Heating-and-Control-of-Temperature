@@ -5,3 +5,5 @@
 .vscode/ipch
 include/fer.cpp
 include/zee.c++
+.virtual/
+results/

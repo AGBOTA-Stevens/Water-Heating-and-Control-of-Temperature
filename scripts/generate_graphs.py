@@ -142,7 +142,7 @@ def make_graphs(rows: list[dict], output_dir: Path) -> None:
         axis.text(
             0.5,
             0.5,
-            "Aucun refroidissement valide : la cible n'a pas ete atteinte.",
+            "Aucune mesure de refroidissement recue.",
             ha="center",
             va="center",
             transform=axis.transAxes,
@@ -152,7 +152,8 @@ def make_graphs(rows: list[dict], output_dir: Path) -> None:
     axis.set_ylabel("Temperature (°C)")
     axis.xaxis.set_major_formatter(date_formatter)
     axis.grid(True, alpha=0.3)
-    axis.legend()
+    if cooling_rows:
+        axis.legend()
     figure.autofmt_xdate()
     figure.tight_layout()
     figure.savefig(output_dir / "cooling_vs_time.png", dpi=300)
@@ -209,48 +210,57 @@ def capture(args: argparse.Namespace) -> list[dict]:
     recording = False
     experiment_start_datetime: datetime | None = None
     print(f"Ecoute de {args.port}. Appuyez sur Ctrl+C pour arreter.")
-    with serial.Serial(args.port, args.baud, timeout=1) as connection:
-        time.sleep(2)
-        while True:
-            line = connection.readline().decode("utf-8", errors="replace").strip()
-            if not line:
-                continue
-            if line == "EXPERIMENT_BEGIN":
-                rows = []
-                recording = True
-                experiment_start_datetime = datetime.now().replace(microsecond=0)
-                print("Experience demarree.")
-            elif line == "EXPERIMENT_END":
-                if recording:
-                    return rows
-                print("Fin d'experience ignoree : aucun debut recu.")
-            elif recording and line.startswith("DATA,"):
-                values = next(csv.reader([line]))
-                if len(values) != len(DATA_FIELDS):
-                    raise ValueError(
-                        f"Ligne DATA invalide ({len(values)} champs au lieu de "
-                        f"{len(DATA_FIELDS)}) : {line}"
-                    )
-                if values[1] == "elapsed_s":
+    try:
+        with serial.Serial(args.port, args.baud, timeout=1) as connection:
+            time.sleep(2)
+            while True:
+                line = connection.readline().decode("utf-8", errors="replace").strip()
+                if not line:
                     continue
-                elapsed_s = float(values[1])
-                rows.append(
-                    {
-                        "record": values[0],
-                        "elapsed_s": elapsed_s,
-                        "timestamp": (
-                            experiment_start_datetime
-                            + timedelta(seconds=elapsed_s)
-                        ).isoformat(sep=" ")
-                        if experiment_start_datetime is not None
-                        else datetime.now().isoformat(sep=" "),
-                        "phase": values[2],
-                        **{
-                            field: float(value)
-                            for field, value in zip(DATA_FIELDS[3:], values[3:])
-                        },
-                    }
-                )
+                if line == "EXPERIMENT_BEGIN":
+                    rows = []
+                    recording = True
+                    experiment_start_datetime = datetime.now().replace(microsecond=0)
+                    print("Experience demarree.")
+                elif line == "EXPERIMENT_END":
+                    if recording:
+                        return rows
+                    print("Fin d'experience ignoree : aucun debut recu.")
+                elif recording and line.startswith("DATA,"):
+                    values = next(csv.reader([line]))
+                    if len(values) != len(DATA_FIELDS):
+                        raise ValueError(
+                            f"Ligne DATA invalide ({len(values)} champs au lieu de "
+                            f"{len(DATA_FIELDS)}) : {line}"
+                        )
+                    if values[1] == "elapsed_s":
+                        continue
+                    elapsed_s = float(values[1])
+                    rows.append(
+                        {
+                            "record": values[0],
+                            "elapsed_s": elapsed_s,
+                            "timestamp": (
+                                experiment_start_datetime
+                                + timedelta(seconds=elapsed_s)
+                            ).isoformat(sep=" ")
+                            if experiment_start_datetime is not None
+                            else datetime.now().isoformat(sep=" "),
+                            "phase": values[2],
+                            **{
+                                field: float(value)
+                                for field, value in zip(DATA_FIELDS[3:], values[3:])
+                            },
+                        }
+                    )
+    except KeyboardInterrupt:
+        if rows:
+            print(
+                "\nCapture arretee manuellement : les mesures deja recues "
+                "seront utilisees pour generer les graphes."
+            )
+            return rows
+        raise
 
 
 def main() -> None:
@@ -259,7 +269,10 @@ def main() -> None:
     try:
         rows = capture(args)
     except KeyboardInterrupt:
-        print("\nCapture interrompue.", file=sys.stderr)
+        print(
+            "\nCapture interrompue avant la reception d'une mesure.",
+            file=sys.stderr,
+        )
         return
     except serial.SerialException as error:
         raise SystemExit(f"Impossible d'ouvrir le port serie : {error}") from error

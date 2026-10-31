@@ -169,7 +169,7 @@ void markHeatingCompleted() {
 }
 
 void startCoolingLogging() {
-  if (!experimentLogging || experimentPhase != EXPERIMENT_HEATING || !heatingCompleted) {
+  if (!experimentLogging || experimentPhase != EXPERIMENT_HEATING) {
     return;
   }
   experimentPhase = EXPERIMENT_COOLING;
@@ -318,11 +318,9 @@ void handleShortButtonPress() {
     resetTuDetection(); // Nouvelle mesure Tu à chaque démarrage du chauffage
     startExperimentLogging(millis());
   } else {
-    if (heatingCompleted) {
-      startCoolingLogging();
-    } else {
-      stopExperimentLogging();
-    }
+    // Un appui qui eteint effectivement le chauffage demarre le refroidissement,
+    // meme si la temperature cible n'a pas encore ete atteinte.
+    startCoolingLogging();
   }
   enreglage = false; // Sortir du mode d'enregistrement si le bouton est pressé
 }
